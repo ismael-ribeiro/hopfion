@@ -149,15 +149,26 @@ function finishArrows(im, n) {
   im.count = n; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
 }
 
-const sheetPlane = new THREE.Mesh(new THREE.PlaneGeometry(2 * A, 2 * A),
-  new THREE.MeshStandardMaterial({color: 0xbfc4cc, transparent: true, opacity: .28, side: THREE.DoubleSide, depthWrite: false}));
-sheetPlane.matrixAutoUpdate = false; scene.add(sheetPlane);
-const sheetEdge = new THREE.LineSegments(new THREE.EdgesGeometry(sheetPlane.geometry),
-  new THREE.LineBasicMaterial({color: 0x777c85}));
+// sheets coloured by their spins (spin colour map), so the two skyrmions can be compared
+function colouredSheet() {
+  const g = new THREE.PlaneGeometry(2 * A, 2 * A, 80, 80);
+  g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3));
+  const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({vertexColors: true, transparent: true, opacity: .8,
+    side: THREE.DoubleSide, depthWrite: false}));
+  mesh.matrixAutoUpdate = false; scene.add(mesh); return mesh;
+}
+function paintSheet(mesh, spinAt) {              // spinAt(xi, eta) -> world spin
+  const p = mesh.geometry.attributes.position, c = mesh.geometry.attributes.color;
+  for (let i = 0; i < p.count; i++) { spinColor(spinAt(p.getX(i), p.getY(i)), tmpC); c.setXYZ(i, tmpC.r, tmpC.g, tmpC.b); }
+  c.needsUpdate = true;
+}
+const edgeGeom = new THREE.EdgesGeometry(new THREE.PlaneGeometry(2 * A, 2 * A));
+const sheetPlane = colouredSheet();
+const sheetEdge = new THREE.LineSegments(edgeGeom, new THREE.LineBasicMaterial({color: 0x777c85}));
 sheetEdge.matrixAutoUpdate = false; scene.add(sheetEdge);
 const Mfixed = new THREE.Matrix4().makeTranslation(R, 0, 0).multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
-const fixedPlane = sheetPlane.clone(); fixedPlane.matrix.copy(Mfixed); scene.add(fixedPlane);
-const fixedEdge = new THREE.LineSegments(sheetEdge.geometry, new THREE.LineBasicMaterial({color: 0x4a7fd6}));
+const fixedPlane = colouredSheet(); fixedPlane.matrix.copy(Mfixed);
+const fixedEdge = new THREE.LineSegments(edgeGeom, new THREE.LineBasicMaterial({color: 0x4a7fd6}));
 fixedEdge.matrixAutoUpdate = false; fixedEdge.matrix.copy(Mfixed); scene.add(fixedEdge);
 
 const torusMat = new THREE.MeshStandardMaterial({vertexColors: true, roughness: .4, transparent: true,
@@ -206,6 +217,8 @@ function build() {
     .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2 * b));
   sheetPlane.matrix.copy(Msheet); sheetEdge.matrix.copy(Msheet);
   sheetPlane.visible = sheetEdge.visible = !done;
+  if (!done) paintSheet(sheetPlane, (xi, eta) => m0(xi, -eta).applyAxisAngle(X, -1.5 * Math.PI * a)
+    .applyAxisAngle(X, -Math.PI / 2 * b).applyAxisAngle(Z, st.nt * psi));
   let n = 0;
   if (!done) for (let i = 0; i <= 16; i++) for (let k = 0; k <= 16; k++) {
     const xi = -A + i * .5, eta = -A + k * .5;
@@ -220,6 +233,7 @@ function build() {
   // a copy of the standing skyrmion stays at azimuth 0, to compare with the moving one
   const showFixed = sweeping && !done;
   fixedPlane.visible = fixedEdge.visible = showFixed;
+  if (showFixed) paintSheet(fixedPlane, (xi, eta) => m0(xi, -eta));
   let nf = 0;
   if (showFixed) for (let i = 0; i <= 16; i++) for (let k = 0; k <= 16; k++) {
     const xi = -A + i * .5, eta = -A + k * .5, m = m0(xi, -eta);
