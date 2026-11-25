@@ -26,6 +26,7 @@ input[type=range]{width:100%;accent-color:var(--accent);margin:4px 0 0}
 details{border-top:1px solid var(--line);margin-top:10px;padding-top:6px;font-size:13px}
 summary{cursor:pointer;color:var(--muted)}
 .chk{display:flex;gap:6px;align-items:center;margin:4px 0}
+.row label.chk{justify-content:flex-start;font-weight:400;margin-top:8px}
 body.simple .full,body.simple .sub,body.simple h1,body.simple #vs{display:none}
 body.simple #ui{width:260px}
 #hint{position:fixed;right:16px;bottom:12px;font-size:12px;color:var(--muted)}
@@ -37,7 +38,8 @@ body.simple #ui{width:260px}
   <h1>Hopfion builder</h1>
   <div class="sub">A skyrmion tube bent into a ring and twisted</div>
   <div class="row"><label><b>Skyrmion → Hopfion</b> <span id="vs"></span></label>
-    <input id="s" type="range" min="0" max="1" step="0.001" value="0"><div id="stage"></div></div>
+    <input id="s" type="range" min="0" max="1" step="0.001" value="0"><div id="stage"></div>
+    <label class="chk"><input id="po" type="checkbox"> Show only the planes</label></div>
   <div class="full">
   <div class="row"><label><b>Poloidal winding n<sub>pol</sub></b> <span id="vnp"></span></label>
     <input id="np" type="range" min="-5" max="5" step="1" value="-1"></div>
@@ -244,7 +246,7 @@ function build() {
 
   // torus m_z = 0 (rho = a/2), grown behind the sheet
   torus.geometry.dispose();
-  torus.visible = sweeping && st.op > .01;
+  torus.visible = sweeping && st.op > .01 && !st.po;
   if (torus.visible) {
     const nu = Math.max(2, Math.round(192 * psi / TWO)), nv = 64, pos = [], col = [], idx = [];
     for (let i = 0; i <= nu; i++) for (let k = 0; k <= nv; k++) {
@@ -267,7 +269,7 @@ function build() {
   for (const c of loopGroup.children) c.geometry.dispose();
   loopGroup.clear();
   let nt = 0;
-  if (sweeping) for (let j = 0; j < J; j++) {
+  if (sweeping && !st.po) for (let j = 0; j < J; j++) {
     const Pj = j * TWO / J, dir = new THREE.Vector3(Math.cos(Pj), Math.sin(Pj), 0), color = spinColor(dir);
     for (const c of preimageCurves(j, psi)) {
       if (st.loops) {
@@ -291,7 +293,7 @@ function build() {
 
   // 3D spin lattice of the finished hopfion (lower half, z <= 0)
   let nl = 0, nb = 0;
-  if (done && st.spins) for (let x = -8; x <= 8; x++) for (let y = -8; y <= 8; y++) for (let z = -4; z <= 0; z++) {
+  if (done && st.spins && !st.po) for (let x = -8; x <= 8; x++) for (let y = -8; y <= 8; y++) for (let z = -4; z <= 0; z++) {
     const m = mField(x, y, z), p = new THREE.Vector3(x, y, z);
     if (m.z > .8) putArrow(bgArrows, nb++, p, m, spinColor(m, tmpC));
     else putArrow(latticeArrows, nl++, p, m, spinColor(m, tmpC));
@@ -320,7 +322,7 @@ const $ = id => document.getElementById(id);
 let dirty = true;
 const bind = (id, key, f = Number) => $(id).addEventListener('input', e => { st[key] = f(e.target.value); dirty = true; });
 bind('s', 's'); bind('np', 'np'); bind('nt', 'nt'); bind('g', 'g', v => v * Math.PI / 180); bind('op', 'op');
-for (const [id, key] of [['cl', 'loops'], ['ct', 'tracers'], ['cs', 'spins']])
+for (const [id, key] of [['po', 'po'], ['cl', 'loops'], ['ct', 'tracers'], ['cs', 'spins']])
   $(id).addEventListener('change', e => { st[key] = e.target.checked; dirty = true; });
 
 renderer.setAnimationLoop(() => {
