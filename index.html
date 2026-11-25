@@ -136,6 +136,7 @@ function arrows(max, L, rs, rh, opacity = 1) {
   im.setColorAt(0, new THREE.Color()); return im;
 }
 const sheetArrows = arrows(17 * 17, .45, .035, .09);
+const fixedArrows = arrows(17 * 17, .45, .035, .09);     // copy of the sheet left at azimuth 0
 const tracerArrows = arrows(J * 5 * K, 1.0, .06, .16);
 const latticeArrows = arrows(17 * 17 * 5, .7, .045, .11);
 const bgArrows = arrows(17 * 17 * 5, .5, .03, .08, .25);
@@ -154,6 +155,10 @@ sheetPlane.matrixAutoUpdate = false; scene.add(sheetPlane);
 const sheetEdge = new THREE.LineSegments(new THREE.EdgesGeometry(sheetPlane.geometry),
   new THREE.LineBasicMaterial({color: 0x777c85}));
 sheetEdge.matrixAutoUpdate = false; scene.add(sheetEdge);
+const Mfixed = new THREE.Matrix4().makeTranslation(R, 0, 0).multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+const fixedPlane = sheetPlane.clone(); fixedPlane.matrix.copy(Mfixed); scene.add(fixedPlane);
+const fixedEdge = new THREE.LineSegments(sheetEdge.geometry, new THREE.LineBasicMaterial({color: 0x4a7fd6}));
+fixedEdge.matrixAutoUpdate = false; fixedEdge.matrix.copy(Mfixed); scene.add(fixedEdge);
 
 const torusMat = new THREE.MeshStandardMaterial({vertexColors: true, roughness: .4, transparent: true,
   side: THREE.DoubleSide, depthWrite: false});
@@ -211,6 +216,17 @@ function build() {
     putArrow(sheetArrows, n++, pos, m, spinColor(m, tmpC));
   }
   finishArrows(sheetArrows, n);
+
+  // a copy of the standing skyrmion stays at azimuth 0, to compare with the moving one
+  const showFixed = sweeping && !done;
+  fixedPlane.visible = fixedEdge.visible = showFixed;
+  let nf = 0;
+  if (showFixed) for (let i = 0; i <= 16; i++) for (let k = 0; k <= 16; k++) {
+    const xi = -A + i * .5, eta = -A + k * .5, m = m0(xi, -eta);
+    const pos = new THREE.Vector3(xi, eta, 0).applyMatrix4(Mfixed).add(new THREE.Vector3(0, -.02, 0));
+    putArrow(fixedArrows, nf++, pos, m, spinColor(m, tmpC));
+  }
+  finishArrows(fixedArrows, nf);
 
   // torus m_z = 0 (rho = a/2), grown behind the sheet
   torus.geometry.dispose();
