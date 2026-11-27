@@ -54,6 +54,8 @@ body.simple #ui{width:260px}
     <input id="nt" type="range" min="-5" max="5" step="1" value="1"></div>
   <div class="row"><label><b>Helicity γ</b> <span id="vg"></span></label>
     <input id="g" type="range" min="-180" max="180" step="1" value="0"></div>
+  <div class="row"><label><b>Preimage loops</b> <span id="vj"></span></label>
+    <input id="jn" type="range" min="1" max="12" step="1" value="4"></div>
   <div class="q"><b id="qh"></b><div id="qtext"></div></div>
   <details><summary>Display</summary>
     <div class="row"><label><b>Torus opacity</b> <span id="vop"></span></label>
@@ -77,7 +79,8 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 // ---------------------------------------------------------------- texture (same as hopfion_nodes.py)
 // m = (sin t cos P, sin t sin P, -cos t),  t = pi min(rho/a, 1),  P = n_pol alpha + n_tor phi + gamma
 // core ring down, background up (polarity -1);  Q_H = -n_pol n_tor  (Goebel et al. convention)
-const R = 4, A = 4, RHO = A / 2, TWO = 2 * Math.PI, N = 400, K = 10, J = 4;
+const R = 4, A = 4, RHO = A / 2, TWO = 2 * Math.PI, N = 400, K = 10, JMAX = 12;
+let J = 4;                                  // number of preimage loops (slider)
 const st = {s: 1, np: -1, nt: 1, g: 0, op: .45, loops: true, tracers: true, spins: true, pa: 0, cc: true};
 
 const clamp = x => Math.min(Math.max(x, 0), 1);
@@ -144,7 +147,7 @@ function arrows(max, L, rs, rh, opacity = 1) {
 }
 const sheetArrows = arrows(17 * 17, .45, .035, .09);
 const fixedArrows = arrows(17 * 17, .45, .035, .09);     // copy of the sheet left at azimuth 0
-const tracerArrows = arrows(J * 5 * K, 1.0, .06, .16);
+const tracerArrows = arrows(JMAX * 5 * K, 1.0, .06, .16);
 const latticeArrows = arrows(17 * 17 * 5, .7, .045, .11);
 const bgArrows = arrows(17 * 17 * 5, .5, .03, .08, .25);
 const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3(1, 1, 1), tmpC = new THREE.Color();
@@ -339,7 +342,7 @@ function build() {
   if (sweeping && !st.po) for (let j = 0; j < J; j++) for (const c of preimageCurves(j, psi)) {
     c.j = j; c.m = (c.b % P.g) * J + j; curves.push(c);
   }
-  const ck = [st.np, st.nt, st.g, st.s, st.po].join();
+  const ck = [st.np, st.nt, st.g, st.s, st.po, J].join();
   if (ck !== contactKey) { contact = findContact(curves, P); contactKey = ck; }
   const pull = Math.min(st.pa, contact.lam), stuck = pulled && st.pa >= contact.lam - 1e-5;
   const lift = (p, m) => new THREE.Vector3(p.x, p.y, p.z + pull * speed(P, m, p.z));
@@ -390,6 +393,7 @@ function build() {
   ps.dataset.lam = contact.lam.toFixed(4);
   ps.classList.toggle('stuck', stuck);
   ps.textContent = st.po ? '' : !curves.length ? (sweeping ? 'No loops for n_pol = n_tor = 0.' : 'Build the hopfion first (Skyrmion → Hopfion).')
+    : J * P.g === 1 ? 'Only one loop: add loops to see whether they link.'
     : stuck ? `Stuck at ${pull.toFixed(2)}: two loops touch (yellow ball). Linked loops cannot be pulled apart.`
     : !pulled ? 'Slide the loops apart along the z axis.'
     : contact.lam > 1 ? (st.pa > .999 ? 'Apart: the loops slid past each other without touching. They are not linked.'
@@ -400,7 +404,7 @@ function build() {
     : st.s < .4 ? 'The skyrmion stands up beside the z axis'
     : !done ? `Sweeping round z, spins turning ${st.nt} time(s): ${Math.round(psi / TWO * 100)}%`
     : 'Hopfion complete';
-  $('vnp').textContent = st.np; $('vnt').textContent = st.nt;
+  $('vnp').textContent = st.np; $('vnt').textContent = st.nt; $('vj').textContent = J;
   const gd = Math.round(st.g * 180 / Math.PI);
   $('vg').textContent = `${gd}°` + (Math.abs(gd) % 180 === 0 ? ' (Néel)' : Math.abs(gd) === 90 ? ' (Bloch)' : '');
   $('vop').textContent = st.op.toFixed(2);
@@ -414,6 +418,7 @@ const $ = id => document.getElementById(id);
 
 let dirty = true;
 const bind = (id, key, f = Number) => $(id).addEventListener('input', e => { st[key] = f(e.target.value); dirty = true; });
+$('jn').addEventListener('input', e => { J = Number(e.target.value); dirty = true; });
 bind('s', 's'); bind('np', 'np'); bind('nt', 'nt'); bind('g', 'g', v => v * Math.PI / 180); bind('op', 'op');
 bind('pa', 'pa');
 for (const [id, key] of [['po', 'po'], ['cl', 'loops'], ['ct', 'tracers'], ['cs', 'spins'], ['cc', 'cc']])
