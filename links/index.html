@@ -43,7 +43,8 @@ body.simple #ui{width:260px}
   <div class="sub">Linked loops get stuck, unlinked ones slide free · <a href="../">builder</a></div>
   <div class="row"><label><b>Pull apart</b> <span id="vpa"></span></label>
     <input id="pa" type="range" min="0" max="1" step="0.001" value="0"><div id="pstat"></div>
-    <label class="chk"><input id="cc" type="checkbox" checked> Hooks</label></div>
+    <label class="chk"><input id="cc" type="checkbox" checked> Hooks</label>
+    <label class="chk"><input id="kp" type="checkbox"> Keep pulling (let them pass through)</label></div>
   <div class="row"><label><b>Skyrmion → Hopfion</b> <span id="vs"></span></label>
     <input id="s" type="range" min="0" max="1" step="0.001" value="1"><div id="stage"></div>
     <label class="chk"><input id="po" type="checkbox"> Show only the planes</label></div>
@@ -81,7 +82,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 // core ring down, background up (polarity -1);  Q_H = -n_pol n_tor  (Goebel et al. convention)
 const R = 4, A = 4, RHO = A / 2, TWO = 2 * Math.PI, N = 400, K = 10, JMAX = 12;
 let J = 4;                                  // number of preimage loops (slider)
-const st = {s: 1, np: -1, nt: 1, g: 0, op: .45, loops: true, tracers: true, spins: true, pa: 0, cc: true};
+const st = {s: 1, np: -1, nt: 1, g: 0, op: .45, loops: true, tracers: true, spins: true, pa: 0, cc: true, kp: false};
 
 const clamp = x => Math.min(Math.max(x, 0), 1);
 const ease = x => x * x * (3 - 2 * x);
@@ -300,15 +301,24 @@ function findHooks(curves, P) {
         const za = a0.z + t * (a1.z - a0.z), zb = b0.z + u * (b1.z - b0.z);
         const va = speed(P, ma, za), vb = speed(P, mb, zb);
         if ((za - zb) * (va - vb) >= 0) continue;                // gap not closing: no hook
-        hooks.push({x: a0.x + t * dax, y: a0.y + t * day, za, zb, va, vb, pair: ma * 100 + mb});
+        // when it touches: near the hook both tubes are straight lines crossing seen from above, so
+        // their distance is |vertical gap| |n_z| (n: unit normal to both): touch at a gap 2r / |n_z|
+        const n = new THREE.Vector3().subVectors(a1, a0).normalize()
+          .cross(new THREE.Vector3().subVectors(b1, b0).normalize());
+        const nz = Math.abs(n.z) / Math.max(n.length(), 1e-9), gapT = TOUCH / Math.max(nz, .25);
+        const g0 = Math.abs(za - zb), rate = Math.max(Math.abs(va - vb), 1e-6);
+        const lt = Math.max(g0 - gapT, 0) / rate, ls = (g0 + gapT) / rate;
+        hooks.push({x: a0.x + t * dax, y: a0.y + t * day, za, zb, va, vb, pair: ma * 100 + mb,
+          lt, ls, zm: (za + zb) / 2 + lt * (va + vb) / 2});
       }
     }
   }
   return hooks;
 }
-let contactKey = '', contact = {lam: 2, spots: []}, hooks = [];
+// Keep pulling: the loops pass through each other; Pull apart 1 = every hook passed (at least the usual 1)
+let contactKey = '', contact = {lam: 2, spots: []}, hooks = [], lamEnd = 1;
 const balls = new THREE.InstancedMesh(new THREE.SphereGeometry(BALL, 32, 16),
-  new THREE.MeshStandardMaterial({color: 0xffc400, roughness: .3}), 64);
+  new THREE.MeshStandardMaterial({color: 0xffc400, roughness: .3}), 2048);
 balls.count = 0; scene.add(balls);
 const barGeom = new THREE.CylinderGeometry(.2 * BALL, .2 * BALL, 1, 12); barGeom.rotateX(Math.PI / 2);
 const bars = new THREE.InstancedMesh(barGeom, balls.material, 2048);
@@ -377,8 +387,17 @@ function build() {
     c.j = j; c.m = j; curves.push(c);
   }
   const ck = [st.np, st.nt, st.g, st.s, st.po, J].join();
-  if (ck !== contactKey) { contact = findContact(curves, P); hooks = findHooks(curves, P); contactKey = ck; }
-  const pull = Math.min(st.pa, contact.lam), stuck = pulled && st.pa >= contact.lam - 1e-5;
+  if (ck !== contactKey) {
+    contact = findContact(curves, P); hooks = findHooks(curves, P); contactKey = ck;
+    lamEnd = Math.max(1, 1.05 * hooks.reduce((m, h) => Math.max(m, h.ls), 0));
+  }
+  const pull = st.kp ? st.pa * lamEnd : Math.min(st.pa, contact.lam);
+  const stuck = !st.kp && pulled && st.pa >= contact.lam - 1e-5;
+  const passed = st.kp && pull > contact.lam + 1e-5;   // past the first touch: drawn see-through
+  if (loopMat.transparent !== passed) {
+    loopMat.transparent = passed; loopMat.opacity = passed ? .3 : 1; loopMat.depthWrite = !passed;
+    loopMat.needsUpdate = true;
+  }
   const lift = (p, m) => new THREE.Vector3(p.x, p.y, p.z + pull * speed(P, m, p.z));
   for (const c of loopGroup.children) c.geometry.dispose();
   loopGroup.clear();
@@ -406,12 +425,19 @@ function build() {
   }
   finishArrows(tracerArrows, nt);
   let nballs = 0;
+  const metPer = {};                               // Keep pulling: hooks whose tubes have met
   if (stuck && st.cc && st.loops) for (const p of contact.spots.slice(0, 64)) {
     balls.setMatrixAt(nballs++, tmpM.makeTranslation(p.x, p.y, p.z));
+  }
+  if (st.kp && pulled) for (const h of hooks) {
+    if (pull < h.lt) continue;
+    metPer[h.pair] = (metPer[h.pair] || 0) + 1;    // a ball where they met, left there
+    if (st.cc && st.loops && nballs < 2048) balls.setMatrixAt(nballs++, tmpM.makeTranslation(h.x, h.y, h.zm));
   }
   balls.count = nballs; balls.instanceMatrix.needsUpdate = true;
   let nbars = 0;                                   // hook bars: from loop A to loop B at this pull
   if (pulled && st.cc && st.loops) for (const h of hooks.slice(0, 2048)) {
+    if (st.kp && pull > h.lt) continue;            // met already: a ball instead
     const a = h.za + pull * h.va, b = h.zb + pull * h.vb;
     bars.setMatrixAt(nbars++, tmpM.compose(new THREE.Vector3(h.x, h.y, (a + b) / 2), tmpQ.identity(),
       new THREE.Vector3(1, 1, Math.max(Math.abs(a - b), 1e-3))));
@@ -440,10 +466,17 @@ function build() {
     : counts.length === J * (J - 1) / 2 && counts.every(c => c === counts[0])
       ? ` Each pair of colours is hooked ${counts[0]} time${counts[0] > 1 ? 's' : ''} (yellow bars): |Q_H| = ${counts[0]}.`
       : ` ${hooks.length} hooks (yellow bars).`;
-  ps.classList.toggle('stuck', stuck);
+  const met = Object.values(metPer).reduce((s, c) => s + c, 0), metCounts = Object.values(metPer);
+  ps.dataset.met = JSON.stringify(metPer); ps.dataset.lamEnd = lamEnd.toFixed(4);
+  const allMet = hooks.length && met === hooks.length;
+  const metText = allMet && counts.length === J * (J - 1) / 2 && metCounts.every(c => c === counts[0])
+    ? ` To come apart, each pair of colours had to touch ${counts[0]} time${counts[0] > 1 ? 's' : ''} (yellow balls): |Q_H| = ${counts[0]}.`
+    : ` ${met} of ${hooks.length} hooks have touched (yellow balls).`;
+  ps.classList.toggle('stuck', stuck || passed);
   ps.textContent = st.po ? '' : !curves.length ? (sweeping ? 'No loops for n_pol = n_tor = 0.' : 'Build the hopfion first (Skyrmion → Hopfion).')
     : J === 1 ? 'One colour only: add loops to see how two colours link.'
     : stuck ? `Stuck at ${pull.toFixed(2)}: two loops touch (yellow ball). Linked loops cannot be pulled apart.` + hookText
+    : passed ? 'Passing through each other, which real tubes cannot do (see-through loops).' + metText
     : !pulled ? 'Slide the loops apart along the z axis.'
     : contact.lam > 1 ? (st.pa > .999 ? 'Apart: the loops slid past each other without touching. They are not linked.'
       : 'The loops slide past each other without touching.')
@@ -470,7 +503,7 @@ const bind = (id, key, f = Number) => $(id).addEventListener('input', e => { st[
 $('jn').addEventListener('input', e => { J = Number(e.target.value); dirty = true; });
 bind('s', 's'); bind('np', 'np'); bind('nt', 'nt'); bind('g', 'g', v => v * Math.PI / 180); bind('op', 'op');
 bind('pa', 'pa');
-for (const [id, key] of [['po', 'po'], ['cl', 'loops'], ['ct', 'tracers'], ['cs', 'spins'], ['cc', 'cc']])
+for (const [id, key] of [['po', 'po'], ['cl', 'loops'], ['ct', 'tracers'], ['cs', 'spins'], ['cc', 'cc'], ['kp', 'kp']])
   $(id).addEventListener('change', e => { st[key] = e.target.checked; dirty = true; });
 
 renderer.setAnimationLoop(() => {
