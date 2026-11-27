@@ -43,7 +43,7 @@ body.simple #ui{width:260px}
   <div class="sub">Linked loops get stuck, unlinked ones slide free · <a href="../">builder</a></div>
   <div class="row"><label><b>Pull apart</b> <span id="vpa"></span></label>
     <input id="pa" type="range" min="0" max="1" step="0.001" value="0"><div id="pstat"></div>
-    <label class="chk"><input id="cc" type="checkbox" checked> Contact balls</label></div>
+    <label class="chk"><input id="cc" type="checkbox" checked> Hooks</label></div>
   <div class="row"><label><b>Skyrmion → Hopfion</b> <span id="vs"></span></label>
     <input id="s" type="range" min="0" max="1" step="0.001" value="1"><div id="stage"></div>
     <label class="chk"><input id="po" type="checkbox"> Show only the planes</label></div>
@@ -54,13 +54,13 @@ body.simple #ui{width:260px}
     <input id="nt" type="range" min="-5" max="5" step="1" value="1"></div>
   <div class="row"><label><b>Helicity γ</b> <span id="vg"></span></label>
     <input id="g" type="range" min="-180" max="180" step="1" value="0"></div>
-  <div class="row"><label><b>Preimage loops</b> <span id="vj"></span></label>
+  <div class="row"><label><b>Loops</b> <span id="vj"></span></label>
     <input id="jn" type="range" min="1" max="12" step="1" value="4"></div>
   <div class="q"><b id="qh"></b><div id="qtext"></div></div>
   <details><summary>Display</summary>
     <div class="row"><label><b>Torus opacity</b> <span id="vop"></span></label>
       <input id="op" type="range" min="0" max="1" step="0.01" value="0.45"></div>
-    <label class="chk"><input id="cl" type="checkbox" checked> Preimage loops</label>
+    <label class="chk"><input id="cl" type="checkbox" checked> Loops</label>
     <label class="chk"><input id="ct" type="checkbox" checked> Tracer arrows</label>
     <label class="chk"><input id="cs" type="checkbox" checked> Spin lattice (finished hopfion)</label>
   </details>
@@ -218,16 +218,16 @@ function preimageCurves(j, psi) {
 }
 
 // ---------------------------------------------------------------- pull apart (as in hopfion_links.blend)
-// Loop = one closed preimage: direction j, branch b mod g, g = gcd(|n_pol|, |n_tor|); M = J g loops.
-// Each slides rigidly along z: by number, step (m - (M-1)/2) per unit of pull, or for n_tor = 0
-// (horizontal circles) by stretching z.  At 1 the first and last loop are 2.5 rho + 2 r apart, in
-// separate height bands, so linked loops must touch on the way: the pull stops at the first touch.
+// Each colour j (all its loops) slides rigidly along z: step (j - (J-1)/2) per unit of pull, or for
+// n_tor = 0 (horizontal circles) the picture is stretched along z.  At 1 the first and last colour are
+// 2.5 rho + 2 r apart, in separate height bands, so linked loops must touch on the way: the pull stops
+// at the first touch.  Hooks: places where, seen from above, two colours cross with the rising one
+// underneath: |Q_H| of them for each pair of colours.
 const TUBE = .08, TOUCH = 2 * TUBE, BALL = 5 * TUBE;
-const gcd = (a, b) => b ? gcd(b, a % b) : a;
 function pullSetup() {
-  const g = Math.max(gcd(Math.abs(st.np), Math.abs(st.nt)), 1), M = J * g, mid = (M - 1) / 2;
-  const step = (2.5 * RHO + TOUCH) / Math.max(M - 1, 1);
-  return {g, mid, step, rings: st.nt === 0 && st.np !== 0, stretch: step * mid / RHO};
+  const span = 2.5 * RHO + TOUCH;
+  return {mid: (J - 1) / 2, step: span / Math.max(J - 1, 1), rings: st.nt === 0 && st.np !== 0,
+    stretch: span / (2 * RHO)};
 }
 const speed = (P, m, z) => P.rings ? P.stretch * z : P.step * (m - P.mid);
 
@@ -275,10 +275,44 @@ function findContact(curves, P) {
   }
   return {lam, spots};
 }
-let contactKey = '', contact = {lam: 2, spots: []};
+// hooks: a segment of colour A crossing colour B (B > A) seen from above, with the vertical gap closing
+function findHooks(curves, P) {
+  const segs = [];
+  for (const c of curves) {
+    const n = c.pts.length, cnt = c.closed ? n : n - 1;
+    for (let i = 0; i < cnt; i++) segs.push([c.pts[i], c.pts[(i + 1) % n], c.m]);
+  }
+  const CELL = .5, cell = new Map(), key = (ix, iy) => (ix + 4096) * 8192 + (iy + 4096);
+  const cellOf = s => [Math.floor((s[0].x + s[1].x) / 2 / CELL), Math.floor((s[0].y + s[1].y) / 2 / CELL)];
+  segs.forEach((s, i) => { const k = key(...cellOf(s)); let a = cell.get(k); if (!a) cell.set(k, a = []); a.push(i); });
+  const hooks = [];
+  for (const sa of segs) {
+    const [a0, a1, ma] = sa, [ix, iy] = cellOf(sa), dax = a1.x - a0.x, day = a1.y - a0.y;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const list = cell.get(key(ix + dx, iy + dy)); if (!list) continue;
+      for (const j of list) {
+        const [b0, b1, mb] = segs[j]; if (mb <= ma) continue;
+        const dbx = b1.x - b0.x, dby = b1.y - b0.y, den = dax * dby - day * dbx;
+        if (Math.abs(den) < 1e-12) continue;
+        const wx = b0.x - a0.x, wy = b0.y - a0.y;
+        const t = (wx * dby - wy * dbx) / den, u = (wx * day - wy * dax) / den;
+        if (t < 0 || t >= 1 || u < 0 || u >= 1) continue;
+        const za = a0.z + t * (a1.z - a0.z), zb = b0.z + u * (b1.z - b0.z);
+        const va = speed(P, ma, za), vb = speed(P, mb, zb);
+        if ((za - zb) * (va - vb) >= 0) continue;                // gap not closing: no hook
+        hooks.push({x: a0.x + t * dax, y: a0.y + t * day, za, zb, va, vb, pair: ma * 100 + mb});
+      }
+    }
+  }
+  return hooks;
+}
+let contactKey = '', contact = {lam: 2, spots: []}, hooks = [];
 const balls = new THREE.InstancedMesh(new THREE.SphereGeometry(BALL, 32, 16),
   new THREE.MeshStandardMaterial({color: 0xffc400, roughness: .3}), 64);
 balls.count = 0; scene.add(balls);
+const barGeom = new THREE.CylinderGeometry(.2 * BALL, .2 * BALL, 1, 12); barGeom.rotateX(Math.PI / 2);
+const bars = new THREE.InstancedMesh(barGeom, balls.material, 2048);
+bars.count = 0; scene.add(bars);
 
 function build() {
   const {a, b, psi} = phase(st.s);
@@ -340,10 +374,10 @@ function build() {
   // preimage loops and tracers, moved by Pull apart
   const P = pullSetup(), curves = [];
   if (sweeping && !st.po) for (let j = 0; j < J; j++) for (const c of preimageCurves(j, psi)) {
-    c.j = j; c.m = (c.b % P.g) * J + j; curves.push(c);
+    c.j = j; c.m = j; curves.push(c);
   }
   const ck = [st.np, st.nt, st.g, st.s, st.po, J].join();
-  if (ck !== contactKey) { contact = findContact(curves, P); contactKey = ck; }
+  if (ck !== contactKey) { contact = findContact(curves, P); hooks = findHooks(curves, P); contactKey = ck; }
   const pull = Math.min(st.pa, contact.lam), stuck = pulled && st.pa >= contact.lam - 1e-5;
   const lift = (p, m) => new THREE.Vector3(p.x, p.y, p.z + pull * speed(P, m, p.z));
   for (const c of loopGroup.children) c.geometry.dispose();
@@ -376,6 +410,13 @@ function build() {
     balls.setMatrixAt(nballs++, tmpM.makeTranslation(p.x, p.y, p.z));
   }
   balls.count = nballs; balls.instanceMatrix.needsUpdate = true;
+  let nbars = 0;                                   // hook bars: from loop A to loop B at this pull
+  if (pulled && st.cc && st.loops) for (const h of hooks.slice(0, 2048)) {
+    const a = h.za + pull * h.va, b = h.zb + pull * h.vb;
+    bars.setMatrixAt(nbars++, tmpM.compose(new THREE.Vector3(h.x, h.y, (a + b) / 2), tmpQ.identity(),
+      new THREE.Vector3(1, 1, Math.max(Math.abs(a - b), 1e-3))));
+  }
+  bars.count = nbars; bars.instanceMatrix.needsUpdate = true;
 
   // 3D spin lattice of the finished hopfion (lower half, z <= 0)
   let nl = 0, nb = 0;
@@ -391,14 +432,22 @@ function build() {
   $('vpa').textContent = st.pa.toFixed(2);
   const ps = $('pstat');
   ps.dataset.lam = contact.lam.toFixed(4);
+  const per = {};
+  for (const h of hooks) per[h.pair] = (per[h.pair] || 0) + 1;
+  const counts = Object.values(per);
+  ps.dataset.hooks = JSON.stringify(per);
+  const hookText = !counts.length ? ''
+    : counts.length === J * (J - 1) / 2 && counts.every(c => c === counts[0])
+      ? ` Each pair of colours is hooked ${counts[0]} time${counts[0] > 1 ? 's' : ''} (yellow bars): |Q_H| = ${counts[0]}.`
+      : ` ${hooks.length} hooks (yellow bars).`;
   ps.classList.toggle('stuck', stuck);
   ps.textContent = st.po ? '' : !curves.length ? (sweeping ? 'No loops for n_pol = n_tor = 0.' : 'Build the hopfion first (Skyrmion → Hopfion).')
-    : J * P.g === 1 ? 'Only one loop: add loops to see whether they link.'
-    : stuck ? `Stuck at ${pull.toFixed(2)}: two loops touch (yellow ball). Linked loops cannot be pulled apart.`
+    : J === 1 ? 'One colour only: add loops to see how two colours link.'
+    : stuck ? `Stuck at ${pull.toFixed(2)}: two loops touch (yellow ball). Linked loops cannot be pulled apart.` + hookText
     : !pulled ? 'Slide the loops apart along the z axis.'
     : contact.lam > 1 ? (st.pa > .999 ? 'Apart: the loops slid past each other without touching. They are not linked.'
       : 'The loops slide past each other without touching.')
-    : 'Pulling…';
+    : 'Pulling…' + hookText;
   $('vs').textContent = st.s.toFixed(2);
   $('stage').textContent = st.s < .2 ? 'Flat skyrmion: its spins turn about x'
     : st.s < .4 ? 'The skyrmion stands up beside the z axis'
